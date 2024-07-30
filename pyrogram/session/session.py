@@ -24,6 +24,8 @@ from hashlib import sha1
 from io import BytesIO
 from typing import (
     Any,
+    Awaitable,
+    Callable,
     Dict,
     List,
     Optional,
@@ -46,35 +48,6 @@ from pyrogram.errors import (
     Unauthorized,
 )
 from pyrogram.raw.all import layer
-from pyrogram.raw.base import (
-    MsgsAck,
-    MsgsStateReq,
-    Updates,
-)
-from pyrogram.raw.core import (
-    FutureSalts,
-    GzipPacked,
-    Int,
-    Message,
-    MsgContainer,
-    TLObject,
-)
-from pyrogram.raw.types import (
-    BadMsgNotification,
-    BadServerSalt,
-    DestroyAuthKeyFail,
-    DestroyAuthKeyNone,
-    DestroyAuthKeyOk,
-    DestroySessionNone,
-    DestroySessionOk,
-    MsgDetailedInfo,
-    MsgNewDetailedInfo,
-    MsgResendReq,
-    MsgsAllInfo,
-    NewSessionCreated,
-    Pong,
-    RpcResult,
-)
 from .internals import (
     MsgFactory,
     MsgId,
@@ -83,10 +56,47 @@ from .internals import (
 log = logging.getLogger(__name__)
 
 
-class Result:
-    def __init__(self):
-        self.value = None
-        self.event = asyncio.Event()
+class RequestState:
+    def __init__(
+        self,
+        request: raw.core.TLObject,
+    ):
+        self.request = request
+        self.future = asyncio.Future()
+
+    def set_result(self, value: Any) -> None:
+        if self.future.done():
+            return None
+        self.future.set_result(value)
+
+    def set_exception(self, value: Exception) -> None:
+        if self.future.done():
+            return None
+        self.future.set_exception(value)
+
+    @property
+    def request_raw(self) -> raw.core.TLObject:
+        request = self.request
+        while isinstance(
+            request, (
+                raw.functions.InvokeAfterMsg,
+                raw.functions.InvokeAfterMsgs,
+                raw.functions.InitConnection,
+                raw.functions.InvokeWithLayer,
+                raw.functions.InvokeWithoutUpdates,
+                raw.functions.InvokeWithMessagesRange,
+                raw.functions.InvokeWithTakeout,
+                raw.functions.InvokeWithBusinessConnection,
+            )
+        ):
+            request = request.query
+
+        return request
+
+
+def get_auth_key_id(auth_key: bytes) -> bytes:
+    auth_key_sha1 = sha1(auth_key).digest()
+    return auth_key_sha1[-8:]
 
 
 class Session:
@@ -99,6 +109,7 @@ class Session:
     STORED_MSG_IDS_MAX_SIZE = 1000 * 2
 
     TRANSPORT_ERRORS = {
+        403: "forbidden",
         404: "auth key not found",
         429: "transport flood",
         444: "invalid DC"
@@ -122,7 +133,7 @@ class Session:
 
         self.connection: Optional[Connection] = None
 
-        self.auth_key_id = sha1(auth_key).digest()[-8:]
+        self.auth_key_id = get_auth_key_id(self.auth_key)
 
         self.session_id = os.urandom(8)
         self.msg_factory = MsgFactory()
@@ -130,19 +141,50 @@ class Session:
         self.salt = 0
 
         self.pending_acks: Set[int] = set()
+        self.pending_requests: asyncio.Queue[RequestState] = asyncio.Queue()
 
-        self.results: Dict[int, Result] = {}
+        self.results: Dict[int, RequestState] = {}
 
         self.stored_msg_ids: List[int] = []
 
-        self.ping_task = None
+        self.ping_task: Optional[asyncio.Task[None]] = None
         self.ping_task_event = asyncio.Event()
 
-        self.recv_task = None
+        self.recv_task: Optional[asyncio.Task[None]] = None
+        self.send_task: Optional[asyncio.Task[None]] = None
 
         self.is_started = asyncio.Event()
 
         self.loop = asyncio.get_event_loop()
+
+        self.handler_by_constructor_id: Dict[int, Callable[[raw.core.Message], Awaitable[None]]] = {
+            raw.types.RpcResult.ID: self.handle_rpc_result,
+            raw.core.MsgContainer.ID: self.handle_msg_container,
+            raw.core.GzipPacked.ID: self.handle_gzip_packed,
+            raw.types.Pong.ID: self.handle_pong,
+            raw.types.BadServerSalt.ID: self.handle_bad_server_salt,
+            raw.types.BadMsgNotification.ID: self.handle_bad_msg_notification,
+            raw.types.MsgDetailedInfo.ID: self.handle_msg_detailed_info,
+            raw.types.MsgNewDetailedInfo.ID: self.handle_msg_new_detailed_info,
+            raw.types.NewSessionCreated.ID: self.handle_new_session_created,
+            raw.types.MsgsAck.ID: self.handle_msgs_ack,
+            raw.core.FutureSalts.ID: self.handle_future_salts,
+            raw.types.MsgsStateReq.ID: self.handle_state_forgotten,
+            raw.types.MsgResendReq.ID: self.handle_state_forgotten,
+            raw.types.MsgsAllInfo.ID: self.handle_msg_all,
+            raw.types.DestroySessionOk.ID: self.handle_destroy_session,
+            raw.types.DestroySessionNone.ID: self.handle_destroy_session,
+            raw.types.DestroyAuthKeyOk.ID: self.handle_destroy_auth_key,
+            raw.types.DestroyAuthKeyNone.ID: self.handle_destroy_auth_key,
+            raw.types.DestroyAuthKeyFail.ID: self.handle_destroy_auth_key,
+
+            raw.types.Updates.ID: self.handle_update,
+            raw.types.UpdatesCombined.ID: self.handle_update,
+            raw.types.UpdateShortMessage.ID: self.handle_update,
+            raw.types.UpdateShortChatMessage.ID: self.handle_update,
+            raw.types.UpdateShort.ID: self.handle_update,
+            raw.types.UpdatesTooLong.ID: self.handle_update
+        }
 
     async def start(self):
         while True:
@@ -157,6 +199,7 @@ class Session:
                 )
 
                 self.recv_task = self.loop.create_task(self.recv_worker())
+                self.send_task = self.loop.create_task(self.send_worker())
 
                 await self.send(raw.functions.Ping(ping_id=0), timeout=self.START_TIMEOUT)
 
@@ -217,6 +260,9 @@ class Session:
         if self.recv_task:
             await self.recv_task
 
+        if self.send_task:
+            await self.send_task
+
         if not self.is_media and callable(self.client.disconnect_handler):
             try:
                 await self.client.disconnect_handler(self.client)
@@ -254,6 +300,34 @@ class Session:
 
         log.info("PingTask stopped")
 
+    async def send_worker(self):
+        while True:
+            request_state = await self.pending_requests.get()
+
+            try:
+                message = self.msg_factory(request_state.request)
+                payload = await self.loop.run_in_executor(
+                    pyrogram.crypto_executor,
+                    mtproto.pack,
+                    message,
+                    self.salt,
+                    self.session_id,
+                    self.auth_key,
+                    self.auth_key_id
+                )
+
+                self.results[message.msg_id] = request_state
+
+                try:
+                    await self.connection.send(payload)
+                except OSError as exc:
+                    log.warning("Connection error: %s", exc)  # TODO: graceful restart
+                    raise
+                else:
+                    log.debug("Sent: %s", request_state)
+            finally:
+                self.pending_requests.task_done()
+
     async def recv_worker(self):
         log.info("NetworkTask started")
 
@@ -262,7 +336,7 @@ class Session:
 
             if packet is None or len(packet) == 4:
                 if packet:
-                    error_code = -Int.read(BytesIO(packet))
+                    error_code = -int.from_bytes(packet, byteorder="little", signed=True)
 
                     if error_code == 404:
                         raise Unauthorized(
@@ -297,65 +371,23 @@ class Session:
                 return
             except Exception as exc:
                 log.warning("Unhandled exception: %s", exc)
-            
+
             await self.send_pending_acks()
 
         log.info("NetworkTask stopped")
 
-    async def handle_message(self, message: Message) -> None:
+    async def handle_message(self, message: raw.core.Message) -> None:
         if message.seq_no % 2:
             self.pending_acks.add(message.msg_id)
 
         self.message_security_check(message)
 
-        if isinstance(message.body, RpcResult):
-            return await self.handle_rpc_result(message)
+        handler = self.handler_by_constructor_id.get(message.body.ID)
+        if handler is None:
+            return await self.handle_unknown(message)
+        return await handler(message)
 
-        if isinstance(message.body, MsgContainer):
-            return await self.handle_msg_container(message)
-
-        if isinstance(message.body, GzipPacked):
-            return await self.handle_gzip_packed(message)
-
-        if isinstance(message.body, Pong):
-            return await self.handle_pong(message)
-
-        if isinstance(message.body, BadServerSalt):
-            return await self.handle_bad_server_salt(message)
-
-        if isinstance(message.body, BadMsgNotification):
-            return await self.handle_bad_msg_notification(message)
-
-        if isinstance(message.body, MsgDetailedInfo):
-            return await self.handle_msg_detailed_info(message)
-
-        if isinstance(message.body, MsgNewDetailedInfo):
-            return await self.handle_msg_new_detailed_info(message)
-
-        if isinstance(message.body, NewSessionCreated):
-            return await self.handle_new_session_created(message)
-
-        if isinstance(message.body, MsgsAck):
-            return await self.handle_msgs_ack(message)
-
-        if isinstance(message.body, FutureSalts):
-            return await self.handle_future_salts(message)
-
-        if isinstance(message.body, (MsgsStateReq, MsgResendReq)):
-            return await self.handle_state_forgotten(message)
-
-        if isinstance(message.body, MsgsAllInfo):
-            return await self.handle_msg_all(message)
-
-        if isinstance(message.body, (DestroySessionOk, DestroySessionNone)):
-            return await self.handle_destroy_session(message)
-
-        if isinstance(message.body, (DestroyAuthKeyOk, DestroyAuthKeyNone, DestroyAuthKeyFail)):
-            return await self.handle_destroy_auth_key(message)
-
-        return await self.handle_update(message)
-
-    def message_security_check(self, message: Message) -> None:
+    def message_security_check(self, message: raw.core.Message) -> None:
         if len(self.stored_msg_ids) > Session.STORED_MSG_IDS_MAX_SIZE:
             del self.stored_msg_ids[:Session.STORED_MSG_IDS_MAX_SIZE // 2]
 
@@ -383,20 +415,27 @@ class Session:
 
         bisect.insort(self.stored_msg_ids, message.msg_id)
 
-    def set_request_result(self, request_id: int, value: Any) -> None:
-        result = self.results.get(request_id)
-        if result is None:
+    def set_request_state_result(self, msg_id: int, value: Any) -> None:
+        request_state = self.results.pop(msg_id, None)
+        if request_state is None:
             return None
 
-        result.value = value
-        result.event.set()
+        request_state.set_result(value)
+        return None
+
+    def set_request_state_exception(self, msg_id: int, value: Exception) -> None:
+        request_state = self.results.pop(msg_id, None)
+        if request_state is None:
+            return None
+
+        request_state.set_exception(value)
         return None
 
     async def handle_msg_container(
         self,
-        message: Message[MsgContainer],
+        message: raw.core.Message[raw.core.MsgContainer],
     ) -> None:
-        log.debug("MsgContainer received: %s", message)
+        log.debug("raw.core.MsgContainer received: %s", message)
         for msg in message.body.messages:
             try:
                 await self.handle_message(msg)
@@ -405,101 +444,163 @@ class Session:
             except Exception as exc:
                 log.warning("Unhandled exception: %s", exc)
 
-    async def handle_rpc_result(self, message: Message[RpcResult]) -> None:
-        log.debug("RpcResult received: %s", message)
+    async def handle_rpc_result(self, message: raw.core.Message[raw.types.RpcResult]) -> None:
+        log.debug("raw.types.RpcResult received: %s", message)
 
-        self.set_request_result(
-            request_id=message.body.req_msg_id,
-            value=message.body.result
-        )
+        request_state = self.results.pop(message.body.req_msg_id, None)
+        if request_state is None:
+            return None
 
-    async def handle_gzip_packed(self, message: Message[GzipPacked]) -> None:
-        log.debug("GzipPacked received: %s", message)
+        if isinstance(message.body.result, raw.types.RpcError):
+            try:
+                RPCError.raise_it(message.body.result, type(request_state.request_raw))
+            except Exception as exc:
+                request_state.set_exception(exc)
+            else:
+                request_state.set_result(None)
+        else:
+            request_state.set_result(message.body.result)
+
+    async def handle_gzip_packed(self, message: raw.core.Message[raw.core.GzipPacked]) -> None:
+        log.debug("raw.core.GzipPacked received: %s", message)
         # TODO: re-search and handle_message
         return None
 
-    async def handle_pong(self, message: Message[Pong]) -> None:
-        log.debug("Pong received: %s", message)
+    async def handle_pong(self, message: raw.core.Message[raw.types.Pong]) -> None:
+        log.debug("raw.types.Pong received: %s", message)
 
         # TODO: set self ping event
 
-        self.set_request_result(
-            request_id=message.body.msg_id,
+        self.set_request_state_result(
+            msg_id=message.body.msg_id,
             value=message.body
         )
 
-    async def handle_bad_server_salt(self, message: Message[BadServerSalt]) -> None:
-        log.debug("BadServerSalt received: %s", message)
+    async def handle_bad_server_salt(self, message: raw.core.Message[raw.types.BadServerSalt]) -> None:
+        log.debug("raw.types.BadServerSalt received: %s", message)
+
+        self.salt = message.body.new_server_salt
+
+        request_state = self.results.pop(message.body.bad_msg_id, None)
+        if request_state is None:
+            return None
+
+        self.pending_requests.put_nowait(request_state)
+
+    async def handle_bad_msg_notification(self, message: raw.core.Message[raw.types.BadMsgNotification]) -> None:
+        log.debug("raw.types.BadMsgNotification received: %s", message)
         # TODO: re-send messages
 
-        self.set_request_result(
-            request_id=message.body.bad_msg_id,
-            value=message.body
+        request_state = self.results.pop(message.body.bad_msg_id, None)
+        if request_state is None:
+            return None
+
+        rpc_name = ".".join(request_state.request_raw.QUALNAME.split(".")[1:])
+
+        request_state.set_exception(
+            value=RPCError(
+                value="BAD_MSG_NOTIFICATION",
+                rpc_name=rpc_name,
+            )
         )
 
-    async def handle_bad_msg_notification(self, message: Message[BadMsgNotification]) -> None:
-        log.debug("BadMsgNotification received: %s", message)
-        # TODO: re-send messages
-
-        self.set_request_result(
-            request_id=message.body.bad_msg_id,
-            value=message.body
-        )
-
-    async def handle_msg_detailed_info(self, message: Message[MsgDetailedInfo]) -> None:
-        log.debug("MsgDetailedInfo received: %s", message)
+    async def handle_msg_detailed_info(self, message: raw.core.Message[raw.types.MsgDetailedInfo]) -> None:
+        log.debug("raw.types.MsgDetailedInfo received: %s", message)
         self.pending_acks.add(message.body.answer_msg_id)
 
-    async def handle_msg_new_detailed_info(self, message: Message[MsgNewDetailedInfo]) -> None:
-        log.debug("MsgNewDetailedInfo received: %s", message)
+    async def handle_msg_new_detailed_info(self, message: raw.core.Message[raw.types.MsgNewDetailedInfo]) -> None:
+        log.debug("raw.types.MsgNewDetailedInfo received: %s", message)
         self.pending_acks.add(message.body.answer_msg_id)
 
-    async def handle_new_session_created(self, message: Message[NewSessionCreated]) -> None:
-        log.debug("NewSessionCreated received: %s", message)
+    async def handle_new_session_created(self, message: raw.core.Message[raw.types.NewSessionCreated]) -> None:
+        log.debug("raw.types.NewSessionCreated received: %s", message)
         # TODO: re-send requests
         self.salt = message.body.server_salt
         return None
 
-    async def handle_msgs_ack(self, message: Message[MsgsAck]) -> None:
-        log.debug("MsgsAck received: %s", message)
-        # TODO: ack messages
-        # TODO: logOut request set result
+    async def handle_msgs_ack(self, message: raw.core.Message[raw.types.MsgsAck]) -> None:
+        log.debug("raw.types.MsgsAck received: %s", message)
+
+        for msg_id in message.body.msg_ids:
+            request_state = self.results.get(msg_id)
+            if request_state is None:
+                continue
+
+            if isinstance(request_state.request_raw, raw.functions.auth.LogOut):
+                del self.results[msg_id]
+                request_state.set_result(True)
+
         return None
 
-    async def handle_future_salts(self, message: Message[FutureSalts]) -> None:
-        log.debug("FutureSalts received: %s", message)
+    async def handle_future_salts(self, message: raw.core.Message[raw.core.FutureSalts]) -> None:
+        log.debug("raw.core.FutureSalts received: %s", message)
         # TODO: save future salts
 
-        self.set_request_result(
-            request_id=message.body.req_msg_id,
+        self.set_request_state_result(
+            msg_id=message.body.req_msg_id,
             value=message.body
         )
 
-    async def handle_state_forgotten(self, message: Message[Union[MsgsStateReq, MsgResendReq]]) -> None:
-        log.debug("MsgsStateReq/MsgResendReq received: %s", message)
-        # TODO: re-send messages ?
+    async def handle_state_forgotten(
+        self, message: raw.core.Message[Union[raw.types.MsgsStateReq, raw.types.MsgResendReq]]
+    ) -> None:
+        log.debug("raw.types.MsgsStateReq/raw.types.MsgResendReq received: %s", message)
         return None
 
-    async def handle_msg_all(self, message: Message[MsgsAllInfo]) -> None:
-        log.debug("MsgsAllInfo received: %s", message)
-        # TODO: do nothing
+    async def handle_msg_all(self, message: raw.core.Message[raw.types.MsgsAllInfo]) -> None:
+        log.debug("raw.types.MsgsAllInfo received: %s", message)
         return None
 
-    async def handle_destroy_session(self, message: Message[Union[DestroySessionOk, DestroySessionNone]]) -> None:
-        log.debug("DestroySessionOk/DestroySessionNone received: %s", message)
-        # TODO: Find pending destroy_session request and set result
+    async def handle_destroy_session(
+        self, message: raw.core.Message[Union[raw.types.DestroySessionOk, raw.types.DestroySessionNone]]
+    ) -> None:
+        log.debug("raw.types.DestroySessionOk/raw.types.DestroySessionNone received: %s", message)
+
+        msg_ids: List[int] = []
+
+        for msg_id, request_state in self.results.items():
+            request_raw = request_state.request_raw
+
+            if not isinstance(request_raw, raw.functions.DestroySession):
+                continue
+
+            if request_raw.session_id == message.body.session_id:
+                msg_ids.append(msg_id)
+
+        for msg_id in msg_ids:
+            self.set_request_state_result(msg_id=msg_id, value=message.body)
+
         return None
 
     async def handle_destroy_auth_key(
-        self, message: Message[Union[DestroyAuthKeyOk, DestroyAuthKeyNone, DestroyAuthKeyFail]]
+        self,
+        message: raw.core.Message[
+            Union[raw.types.DestroyAuthKeyOk, raw.types.DestroyAuthKeyNone, raw.types.DestroyAuthKeyFail]]
     ) -> None:
-        log.debug("DestroyAuthKeyOk/DestroyAuthKeyNone/DestroyAuthKeyFail received: %s", message)
-        # TODO: Find pending destroy_auth_key request and set result
+        log.debug(
+            "raw.types.DestroyAuthKeyOk/raw.types.DestroyAuthKeyNone/raw.types.DestroyAuthKeyFail received: %s", message
+        )
+
+        # TODO: close connection
+
+        msg_ids: List[int] = []
+
+        for msg_id, request_state in self.results.items():
+            if isinstance(request_state.request_raw, raw.functions.DestroyAuthKey):
+                msg_ids.append(msg_id)
+
+        for msg_id in msg_ids:
+            self.set_request_state_result(msg_id=msg_id, value=message.body)
+
         return None
 
-    async def handle_update(self, message: Message[Updates]) -> None:
-        log.debug("Updates received: %s", message)
+    async def handle_update(self, message: raw.core.Message[raw.base.Updates]) -> None:
+        log.debug("raw.base.Updates received: %s", message)
         await self.client.handle_updates(message.body)
+
+    async def handle_unknown(self, message: raw.core.Message[raw.core.TLObject]) -> None:
+        log.debug("Unknown received: %s", message)
+        return None
 
     async def send_pending_acks(self) -> None:
         if len(self.pending_acks) < self.ACKS_THRESHOLD:
@@ -515,71 +616,27 @@ class Session:
         else:
             self.pending_acks.clear()
 
-    async def send(self, data: TLObject, wait_response: bool = True, timeout: float = WAIT_TIMEOUT):
-        message = self.msg_factory(data)
-        msg_id = message.msg_id
-
-        if wait_response:
-            self.results[msg_id] = Result()
-
-        log.debug("Sent: %s", message)
-
-        payload = await self.loop.run_in_executor(
-            pyrogram.crypto_executor,
-            mtproto.pack,
-            message,
-            self.salt,
-            self.session_id,
-            self.auth_key,
-            self.auth_key_id
-        )
-
-        try:
-            await self.connection.send(payload)
-        except OSError as e:
-            self.results.pop(msg_id, None)
-            raise e
+    async def send(self, data: raw.core.TLObject, wait_response: bool = True, timeout: float = WAIT_TIMEOUT):
+        request_state = RequestState(request=data)
+        self.pending_requests.put_nowait(request_state)
 
         if not wait_response:
             return None
 
         try:
-            await asyncio.wait_for(self.results[msg_id].event.wait(), timeout)
-        except asyncio.TimeoutError:
-            pass
-
-        result = self.results.pop(msg_id).value
-
-        if result is None:
-            raise TimeoutError("Request timed out")
-
-        if isinstance(result, raw.types.RpcError):
-            if isinstance(data, (raw.functions.InvokeWithoutUpdates, raw.functions.InvokeWithTakeout)):
-                data = data.query
-
-            RPCError.raise_it(result, type(data))
-
-        if isinstance(result, raw.types.BadMsgNotification):
-            log.warning("%s: %s", BadMsgNotification.__name__, BadMsgNotification(result.error_code))
-
-        if isinstance(result, raw.types.BadServerSalt):
-            self.salt = result.new_server_salt
-            return await self.send(data, wait_response, timeout)
+            result = await asyncio.wait_for(request_state.future, timeout)
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError("Request timed out") from exc
 
         return result
 
     async def invoke(
         self,
-        query: TLObject,
+        query: raw.core.TLObject,
         retries: int = MAX_RETRIES,
         timeout: float = WAIT_TIMEOUT,
         sleep_threshold: float = SLEEP_THRESHOLD
     ):
-        try:
-            await asyncio.wait_for(self.is_started.wait(), self.WAIT_TIMEOUT)
-        except asyncio.TimeoutError:
-            pass
-
         if isinstance(query, (raw.functions.InvokeWithoutUpdates, raw.functions.InvokeWithTakeout)):
             inner_query = query.query
         else:

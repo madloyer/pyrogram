@@ -52,7 +52,7 @@ async def make_connector(
     timeout: int
 ):
     if proxy is None:
-        return await DirectConnector.new(destination=destination)
+        return await DirectConnector.new(destination=destination, timeout=timeout)
     elif python_socks_proxy_connector:
         return await python_socks_proxy_connector.new(destination=destination, proxy=proxy, timeout=timeout)
     elif socks_proxy_connector:
@@ -94,21 +94,19 @@ class Connection:
                 )
             except Exception as exc:
                 log.warning("Unable to connect due to network issues: %s", exc)
-                raise
+                await asyncio.sleep(1)
+                continue
 
             protocol = protocol_factory(connector)
 
             try:
                 log.info("Connecting protocol...")
                 await protocol.connect()
-            except OSError as e:
-                log.warning("Unable to connect due to network issues: %s", e)
-                await connector.close()
-                await asyncio.sleep(1)
             except Exception as exc:
-                await connector.close()
+                await connector.close(timeout=protocol.TIMEOUT)
                 log.warning("Unable to connect due to network issues: %s", exc)
-                raise
+                await asyncio.sleep(1)
+                continue
 
             log.info(
                 "Connected! %s DC%s%s - IPv%s",

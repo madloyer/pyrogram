@@ -162,12 +162,12 @@ class Session:
 
         self.ping_task_event.set()
 
-        if self.ping_task is not None:
+        if self.ping_task:
             await self.ping_task
 
         self.ping_task_event.clear()
 
-        if self.connection is not None:
+        if self.connection:
             await self.connection.close()
 
         if self.recv_task:

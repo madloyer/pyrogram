@@ -294,7 +294,5 @@ class Auth:
                 await self.close()
 
     async def close(self) -> None:
-        if self.connection is None:
-            return None
-
-        await self.connection.close()
+        if self.connection:
+            await self.connection.close()

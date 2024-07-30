@@ -1,25 +1,24 @@
 import asyncio
 from typing import (
+    Any,
     Dict,
-    Optional,
     Self,
     Tuple,
-    TypedDict,
 )
 
-from python_socks import ProxyType
+from python_socks import (
+    ProxyTimeoutError,
+    ProxyType,
+)
 from python_socks.async_.asyncio import Proxy as AsyncProxy
 
 from .base import Connector
-
-
-class Proxy(TypedDict):
-    scheme: str
-    hostname: str
-    port: int
-    username: Optional[str]
-    password: Optional[str]
-
+from .errors import (
+    ConnectorError,
+    ConnectorProxyError,
+    ConnectorProxyTimeoutError,
+    ConnectorTimeoutError,
+)
 
 proxy_type_by_scheme: Dict[str, ProxyType] = {
     "SOCKS4": ProxyType.SOCKS4,
@@ -30,7 +29,7 @@ proxy_type_by_scheme: Dict[str, ProxyType] = {
 
 class PythonSocksProxyConnector(Connector):
     @classmethod
-    async def new(cls, destination: Tuple[str, int], proxy: Proxy, timeout: int) -> Self:
+    async def new(cls, destination: Tuple[str, int], proxy: Dict[str, Any], timeout: int) -> Self:
         scheme = proxy.get("scheme")
         if scheme is None:
             raise ValueError("No scheme specified")
@@ -52,14 +51,26 @@ class PythonSocksProxyConnector(Connector):
             username=username,
             password=password,
         )
+        try:
+            sock = await proxy.connect(
+                dest_host=destination[0],
+                dest_port=destination[1],
+                timeout=timeout,
+            )
+        except (asyncio.TimeoutError, ProxyTimeoutError) as exc:
+            raise ConnectorProxyTimeoutError("Connection to the proxy server timed out") from exc
+        except Exception as exc:
+            raise ConnectorProxyError("An error occurred while connecting to the proxy server") from exc
 
-        sock = await proxy.connect(
-            dest_host=destination[0],
-            dest_port=destination[1],
-            timeout=timeout,
-        )
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(
+                    sock=sock,
+                ), timeout=timeout
+            )
+        except asyncio.TimeoutError as exc:
+            raise ConnectorTimeoutError("Connection to the destination server timed out") from exc
+        except Exception as exc:
+            raise ConnectorError("An error occurred while connecting to the destination server") from exc
 
-        reader, writer = await asyncio.open_connection(
-            sock=sock
-        )
         return cls(reader=reader, writer=writer)

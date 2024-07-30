@@ -2,16 +2,21 @@ import asyncio
 import ipaddress
 import socket
 from typing import (
+    Optional,
     Self,
     Tuple,
 )
 
 from .base import Connector
+from .errors import (
+    ConnectorError,
+    ConnectorTimeoutError,
+)
 
 
 class DirectConnector(Connector):
     @classmethod
-    async def new(cls, destination: Tuple[str, int]) -> Self:
+    async def new(cls, destination: Tuple[str, int], timeout: Optional[float] = None) -> Self:
         host, port = destination
 
         try:
@@ -23,11 +28,19 @@ class DirectConnector(Connector):
 
         family = socket.AF_INET6 if is_ipv6 else socket.AF_INET
 
-        reader, writer = await asyncio.open_connection(
-            host=host,
-            port=port,
-            family=family
-        )
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(
+                    host=host,
+                    port=port,
+                    family=family
+                ), timeout=timeout
+            )
+        except asyncio.TimeoutError as exc:
+            raise ConnectorTimeoutError("Connection to the destination server timed out") from exc
+        except Exception as exc:
+            raise ConnectorError("An error occurred while connecting to the destination server") from exc
+
         return cls(
             reader=reader,
             writer=writer

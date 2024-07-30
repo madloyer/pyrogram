@@ -3,28 +3,26 @@ import ipaddress
 import socket
 from concurrent.futures import ThreadPoolExecutor
 from typing import (
-    Optional,
+    Any,
+    Dict,
     Self,
     Tuple,
-    TypedDict,
 )
 
 import socks
 
 from .base import Connector
-
-
-class Proxy(TypedDict):
-    scheme: str
-    hostname: str
-    port: int
-    username: Optional[str]
-    password: Optional[str]
+from .errors import (
+    ConnectorError,
+    ConnectorProxyError,
+    ConnectorProxyTimeoutError,
+    ConnectorTimeoutError,
+)
 
 
 class SocksProxyConnector(Connector):
     @classmethod
-    async def new(cls, destination: Tuple[str, int], proxy: Proxy, timeout: int) -> Self:
+    async def new(cls, destination: Tuple[str, int], proxy: Dict[str, Any], timeout: int) -> Self:
         scheme = proxy.get("scheme")
         if scheme is None:
             raise ValueError("No scheme specified")
@@ -59,12 +57,26 @@ class SocksProxyConnector(Connector):
         sock.settimeout(timeout)
 
         loop = asyncio.get_running_loop()
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            await loop.run_in_executor(executor, sock.connect, destination)
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                await asyncio.wait_for(loop.run_in_executor(executor, sock.connect, destination), timeout=timeout)
+        except asyncio.TimeoutError as exc:
+            raise ConnectorProxyTimeoutError("Connection to the proxy server timed out") from exc
+        except Exception as exc:
+            raise ConnectorProxyError("An error occurred while connecting to the proxy server") from exc
 
         sock.setblocking(False)
 
-        reader, writer = await asyncio.open_connection(
-            sock=sock
-        )
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(
+                    sock=sock,
+                ), timeout=timeout
+            )
+        except asyncio.TimeoutError as exc:
+            raise ConnectorTimeoutError("Connection to the destination server timed out") from exc
+        except Exception as exc:
+            raise ConnectorError("An error occurred while connecting to the destination server") from exc
+
         return cls(reader=reader, writer=writer)

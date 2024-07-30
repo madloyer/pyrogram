@@ -84,19 +84,17 @@ class Auth:
         # The server may close the connection at any time, causing the auth key creation to fail.
         # If that happens, just try again up to MAX_RETRIES times.
         while True:
-            self.connection = self.connection_factory(
-                dc_id=self.dc_id,
-                test_mode=self.test_mode,
-                ipv6=self.ipv6,
-                proxy=self.proxy,
-                media=False,
-                protocol_factory=self.protocol_factory
-            )
-
             try:
                 log.info("Start creating a new auth key on DC%s", self.dc_id)
 
-                await self.connection.connect()
+                self.connection = await self.connection_factory.new(
+                    dc_id=self.dc_id,
+                    test_mode=self.test_mode,
+                    ipv6=self.ipv6,
+                    proxy=self.proxy,
+                    media=False,
+                    protocol_factory=self.protocol_factory
+                )
 
                 # Step 1; Step 2
                 nonce = int.from_bytes(urandom(16), "little", signed=True)
@@ -293,4 +291,10 @@ class Auth:
             else:
                 return auth_key
             finally:
-                await self.connection.close()
+                await self.close()
+
+    async def close(self) -> None:
+        if self.connection is None:
+            return None
+
+        await self.connection.close()

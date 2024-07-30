@@ -102,17 +102,15 @@ class Session:
 
     async def start(self):
         while True:
-            self.connection = self.client.connection_factory(
-                dc_id=self.dc_id,
-                test_mode=self.test_mode,
-                ipv6=self.client.ipv6,
-                proxy=self.client.proxy,
-                media=self.is_media,
-                protocol_factory=self.client.protocol_factory
-            )
-
             try:
-                await self.connection.connect()
+                self.connection = await self.client.connection_factory.new(
+                    dc_id=self.dc_id,
+                    test_mode=self.test_mode,
+                    ipv6=self.client.ipv6,
+                    proxy=self.client.proxy,
+                    media=self.is_media,
+                    protocol_factory=self.client.protocol_factory
+                )
 
                 self.recv_task = self.loop.create_task(self.recv_worker())
 
@@ -169,7 +167,8 @@ class Session:
 
         self.ping_task_event.clear()
 
-        await self.connection.close()
+        if self.connection is not None:
+            await self.connection.close()
 
         if self.recv_task:
             await self.recv_task
@@ -233,7 +232,7 @@ class Session:
                                                     "Most likely the client time has to be synchronized.")
             except SecurityCheckMismatch as e:
                 log.info("Discarding packet: %s", e)
-                await self.connection.close()
+                await self.connection.close() # TODO: make graceful restart ?
                 return
             else:
                 bisect.insort(self.stored_msg_ids, msg.msg_id)

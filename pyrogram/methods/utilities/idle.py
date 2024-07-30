@@ -69,19 +69,17 @@ async def idle():
 
             asyncio.run(main())
     """
-    task = None
+    event = asyncio.Event()
 
     def signal_handler(signum, __):
         logging.info(f"Stop signal received ({signals[signum]}). Exiting...")
-        task.cancel()
+        event.set()
 
     for s in (SIGINT, SIGTERM, SIGABRT):
         signal_fn(s, signal_handler)
 
     while True:
-        task = asyncio.create_task(asyncio.sleep(600))
-
         try:
-            await task
+            await event.wait()
         except asyncio.CancelledError:
             break

@@ -23,6 +23,7 @@ from .disconnect import Disconnect
 from .get_password_hint import GetPasswordHint
 from .initialize import Initialize
 from .log_out import LogOut
+from .migrate import MigrateDC
 from .recover_password import RecoverPassword
 from .resend_code import ResendCode
 from .send_code import SendCode
@@ -41,6 +42,7 @@ class Auth(
     GetPasswordHint,
     Initialize,
     LogOut,
+    MigrateDC,
     RecoverPassword,
     ResendCode,
     SendCode,
@@ -48,6 +50,6 @@ class Auth(
     SignIn,
     SignInBot,
     SignUp,
-    Terminate
+    Terminate,
 ):
     pass

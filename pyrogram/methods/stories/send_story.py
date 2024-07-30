@@ -17,7 +17,6 @@
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-import re
 from typing import List, Union, BinaryIO, Callable
 
 import pyrogram

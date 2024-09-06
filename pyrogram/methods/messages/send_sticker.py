@@ -172,7 +172,7 @@ class SendSticker:
                         mime_type=self.guess_mime_type(sticker) or "image/webp",
                         file=file,
                         attributes=[
-                            raw.types.DocumentAttributeFilename(file_name=os.path.basename(sticker))
+                            raw.types.DocumentAttributeFilename(file_name=os.path.basename(sticker)),
                             raw.types.DocumentAttributeSticker(alt=alt,
                                                                stickerset=pyrogram.raw.types.InputStickerSetEmpty()
                                                                ),

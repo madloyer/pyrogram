@@ -57,6 +57,9 @@ class ChatBoost(Object):
 
         used_gift_slug (``str``, *optional*):
             The created Telegram Premium gift code, only set if either gift or giveaway are set AND it is either a gift code for the currently logged in user or if it was already claimed.
+
+        stars (``int``, *optional*):
+            Stars amount.
     """
 
     def __init__(
@@ -71,7 +74,8 @@ class ChatBoost(Object):
         is_giveaway: Optional[bool] = None,
         is_unclaimed: Optional[bool] = None,
         giveaway_message_id: Optional[int] = None,
-        used_gift_slug: Optional[str] = None
+        used_gift_slug: Optional[str] = None,
+        stars: Optional[int] = None
     ):
         super().__init__()
 
@@ -85,6 +89,7 @@ class ChatBoost(Object):
         self.is_unclaimed = is_unclaimed
         self.giveaway_message_id = giveaway_message_id
         self.used_gift_slug = used_gift_slug
+        self.stars = stars
 
     @staticmethod
     def _parse(client: "pyrogram.Client", boost: "raw.types.Boost", users) -> "ChatBoost":
@@ -99,4 +104,5 @@ class ChatBoost(Object):
             is_unclaimed=getattr(boost, "unclaimed", None),
             giveaway_message_id=getattr(boost, "giveaway_msg_id", None),
             used_gift_slug=getattr(boost, "used_gift_slug", None),
+            stars=getattr(boost, "stars", None)
         )

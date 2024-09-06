@@ -42,6 +42,7 @@ class SendPaidMedia:
             "types.InputMediaVideo",
         ]],
         caption: str = "",
+        payload: str = None,
         parse_mode: Optional["enums.ParseMode"] = None,
         caption_entities: List["types.MessageEntity"] = None,
         disable_notification: bool = None,
@@ -72,6 +73,9 @@ class SendPaidMedia:
 
             caption (``str``, *optional*):
                 Media caption, 0-1024 characters after entities parsing.
+
+            invoice_payload (``str``):
+                Bot specified invoice payload.
 
             parse_mode (:obj:`~pyrogram.enums.ParseMode`, *optional*):
                 By default, texts are parsed using both Markdown and HTML styles.
@@ -252,7 +256,8 @@ class SendPaidMedia:
                 peer=await self.resolve_peer(chat_id),
                 media=raw.types.InputMediaPaidMedia(
                     stars_amount=stars_amount,
-                    extended_media=multi_media
+                    extended_media=multi_media,
+                    payload=payload
                 ),
                 silent=disable_notification or None,
                 reply_to=utils.get_reply_to(

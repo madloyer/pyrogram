@@ -473,6 +473,7 @@ class Message(Object, Update):
         web_page: "types.WebPage" = None,
         poll: "types.Poll" = None,
         dice: "types.Dice" = None,
+        stars_amount: int = None,
         new_chat_members: List["types.User"] = None,
         left_chat_member: "types.User" = None,
         new_chat_title: str = None,
@@ -582,6 +583,7 @@ class Message(Object, Update):
         self.web_page = web_page
         self.poll = poll
         self.dice = dice
+        self.stars_amount = stars_amount
         self.new_chat_members = new_chat_members
         self.left_chat_member = left_chat_member
         self.new_chat_title = new_chat_title
@@ -698,6 +700,7 @@ class Message(Object, Update):
             chat_ttl_period = None
             boosts_applied = None
             join_request_approved = None
+            stars_amount = None
 
             service_type = None
 
@@ -772,6 +775,7 @@ class Message(Object, Update):
                 service_type = enums.MessageServiceType.WEB_APP_DATA
             elif isinstance(action, raw.types.MessageActionGiveawayLaunch):
                 giveaway_launched = True
+                stars_amount = getattr(action, "stars", None)
                 service_type = enums.MessageServiceType.GIVEAWAY_LAUNCH
             elif isinstance(action, raw.types.MessageActionGiftCode):
                 gift_code = types.GiftCode._parse(client, action, chats)
@@ -826,6 +830,7 @@ class Message(Object, Update):
                 web_app_data=web_app_data,
                 giveaway_launched=giveaway_launched,
                 gift_code=gift_code,
+                stars_amount=stars_amount,
                 requested_chats=requested_chats,
                 successful_payment=successful_payment,
                 chat_ttl_period=chat_ttl_period,
@@ -1137,7 +1142,7 @@ class Message(Object, Update):
                 if isinstance(message.reply_to, raw.types.MessageReplyHeader):
                     parsed_message.reply_to_message_id = getattr(message.reply_to, "reply_to_msg_id", None)
                     parsed_message.reply_to_top_message_id = getattr(message.reply_to, "reply_to_top_id", None)
-                    
+
                     if message.reply_to.forum_topic:
                         if message.reply_to.reply_to_top_id:
                             parsed_message.message_thread_id = message.reply_to.reply_to_top_id

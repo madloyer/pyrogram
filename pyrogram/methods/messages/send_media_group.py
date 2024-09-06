@@ -477,9 +477,10 @@ class SendMediaGroup:
 
         conn_id = None
 
-        for i in r.updates:
-            if getattr(i, "connection_id", None):
-                conn_id = i.connection_id
+        for u in r.updates:
+            if getattr(u, "connection_id", None):
+                conn_id = u.connection_id
+                break
 
 
         return await utils.parse_messages(

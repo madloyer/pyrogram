@@ -39,7 +39,7 @@ class GetStories:
                 For your personal story you can simply use "me" or "self".
                 For a contact that exists in your Telegram address book you can use his phone number (str).
 
-            story_ids (``int`` | Iterable of ``int``, *optional*):
+            story_ids (``int`` | Iterable of ``int``):
                 Pass a single story identifier or an iterable of story ids (as integers) to get the content of the
                 story themselves.
 

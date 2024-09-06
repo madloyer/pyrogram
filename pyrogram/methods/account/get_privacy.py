@@ -15,53 +15,41 @@
 #
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
-import re
 
 import pyrogram
-from pyrogram import raw, types
+from pyrogram import raw, types, enums
 
 
-class CheckGiftCode:
-    async def check_gift_code(
+class GetPrivacy:
+    async def get_privacy(
         self: "pyrogram.Client",
-        link: str,
-    ) -> "types.CheckedGiftCode":
-        """Get information about a gift code.
+        key: "enums.PrivacyKey"
+    ):
+        """Get account privacy rules.
 
         .. include:: /_includes/usable-by/users.rst
 
         Parameters:
-            link (``str``):
-                The gift code link.
+            key (:obj:`~pyrogram.enums.PrivacyKey`):
+                Privacy key.
 
         Returns:
-            :obj:`~pyrogram.types.CheckedGiftCode`: On success, a checked gift code is returned.
-
-        Raises:
-            ValueError: In case the folder invite link is invalid.
+            List of :obj:`~pyrogram.types.PrivacyRule`: On success, the list of privacy rules is returned.
 
         Example:
             .. code-block:: python
 
-                # get information about a gift code
-                app.check_gift_code("t.me/giftcode/abc1234567def")
+                from pyrogram import enums
+
+                await app.get_privacy(enums.PrivacyKey.PHONE_NUMBER)
         """
-        match = re.match(r"^(?:https?://)?(?:www\.)?(?:t(?:elegram)?\.(?:org|me|dog)/(?:giftcode/|\+))([\w-]+)$", link)
-
-        if match:
-            slug = match.group(1)
-        elif isinstance(link, str):
-            slug = link
-        else:
-            raise ValueError("Invalid gift code link")
-
         r = await self.invoke(
-            raw.functions.payments.CheckGiftCode(
-                slug=slug
+            raw.functions.account.GetPrivacy(
+                key=key.value()
             )
         )
 
         users = {i.id: i for i in r.users}
         chats = {i.id: i for i in r.chats}
 
-        return types.CheckedGiftCode._parse(self, r, users, chats)
+        return types.List(types.PrivacyRule._parse(self, rule, users, chats) for rule in r.rules)

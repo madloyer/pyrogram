@@ -16,50 +16,40 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
-from typing import Union
-
 import pyrogram
 from pyrogram import raw
 
 
-class UpdatePersonalChannel:
-    async def update_personal_channel(
+class SetAccountTTL:
+    async def set_account_ttl(
         self: "pyrogram.Client",
-        chat_id: Union[int, str] = None
-    ) -> bool:
-        """Update your personal channel.
+        days: int
+    ):
+        """Set days to live of account.
+
+        .. note::
+
+            Days should be in range 30-548
 
         .. include:: /_includes/usable-by/users.rst
 
         Parameters:
-            chat_id (``int`` | ``str``):
-                Unique identifier (int) or username (str) of the target user.
-                Use :meth:`~pyrogram.Client.get_personal_channels` to get available channels.
+            days (``int``):
+                Time to live in days.
 
         Returns:
-            ``bool``: True on success.
+            ``bool``: On success, True is returned.
 
         Example:
             .. code-block:: python
 
-                # Update your personal channel
-                await app.update_personal_channel(chat_id)
-
-                # Remove personal channel from your profile
-                await app.update_personal_channel()
+                # Set ttl in days
+                await app.set_account_ttl(365)
         """
-        if chat_id is None:
-            peer = raw.types.InputChannelEmpty()
-        else:
-            peer = await self.resolve_peer(chat_id)
-
-            if not isinstance(peer, raw.types.InputChannel):
-                return False
-
-        return bool(
-            await self.invoke(
-                raw.functions.account.UpdatePersonalChannel(
-                    channel=peer
-                )
+        r = await self.invoke(
+            raw.functions.account.SetAccountTTL(
+                ttl=raw.types.AccountDaysTTL(days=days)
             )
         )
+
+        return r

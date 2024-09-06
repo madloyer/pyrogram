@@ -40,7 +40,8 @@ from pyrogram.raw.types import (
     UpdateUserStatus, UpdateBotInlineQuery, UpdateMessagePoll,
     UpdateBotInlineSend, UpdateChatParticipant, UpdateChannelParticipant,
     UpdateBotChatInviteRequester, UpdateStory, UpdateBotShippingQuery, UpdateBotMessageReaction,
-    UpdateBotMessageReactions, UpdateBotChatBoost, UpdateBusinessBotCallbackQuery
+    UpdateBotMessageReactions, UpdateBotChatBoost, UpdateBusinessBotCallbackQuery,
+    UpdateBotPurchasedPaidMedia
 )
 
 log = logging.getLogger(__name__)
@@ -63,6 +64,7 @@ class Dispatcher:
     MESSAGE_REACTION_UPDATES = (UpdateBotMessageReaction,)
     MESSAGE_REACTION_COUNT_UPDATES = (UpdateBotMessageReactions,)
     CHAT_BOOST_UPDATES = (UpdateBotChatBoost,)
+    PURCHASED_PAID_MEDIA_UPDATES = (UpdateBotPurchasedPaidMedia,)
 
     def __init__(self, client: "pyrogram.Client"):
         self.client = client
@@ -184,6 +186,12 @@ class Dispatcher:
                 ChatBoostHandler
             )
 
+        async def purchased_paid_media_parser(update, users, chats):
+            return (
+                pyrogram.types.PurchasedPaidMedia._parse(self.client, update, users),
+                ChatBoostHandler
+            )
+
         self.update_parsers = {
             Dispatcher.NEW_MESSAGE_UPDATES: message_parser,
             Dispatcher.EDIT_MESSAGE_UPDATES: edited_message_parser,
@@ -200,7 +208,8 @@ class Dispatcher:
             Dispatcher.SHIPPING_QUERY_UPDATES: shipping_query_parser,
             Dispatcher.MESSAGE_REACTION_UPDATES: message_reaction_parser,
             Dispatcher.MESSAGE_REACTION_COUNT_UPDATES: message_reaction_count_parser,
-            Dispatcher.CHAT_BOOST_UPDATES: chat_boost_parser
+            Dispatcher.CHAT_BOOST_UPDATES: chat_boost_parser,
+            Dispatcher.PURCHASED_PAID_MEDIA_UPDATES: purchased_paid_media_parser,
         }
 
         self.update_parsers = {key: value for key_tuple, value in self.update_parsers.items() for key in key_tuple}

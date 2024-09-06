@@ -570,6 +570,7 @@ def pyrogram_api():
             MessageReactionCountUpdated
             ChatBoostUpdated
             ShippingOption
+            PurchasedPaidMedia
         """,
         bot_commands="""
         Bot commands

@@ -43,6 +43,7 @@ from .message_reaction_count_updated import MessageReactionCountUpdated
 from .message_reaction_updated import MessageReactionUpdated
 from .order_info import OrderInfo
 from .pre_checkout_query import PreCheckoutQuery
+from .purchased_paid_media import PurchasedPaidMedia
 from .reply_keyboard_markup import ReplyKeyboardMarkup
 from .reply_keyboard_remove import ReplyKeyboardRemove
 from .request_channel_info import RequestChannelInfo
@@ -91,6 +92,7 @@ __all__ = [
     "MessageReactionUpdated",
     "OrderInfo",
     "PreCheckoutQuery",
+    "PurchasedPaidMedia",
     "MenuButtonDefault",
     "SentWebAppMessage",
     "ShippingOption",

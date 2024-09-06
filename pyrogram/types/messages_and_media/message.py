@@ -2967,6 +2967,7 @@ class Message(Object, Update):
     async def reply_sticker(
         self,
         sticker: Union[str, BinaryIO],
+        alt: str = "😐",
         quote: bool = None,
         disable_notification: bool = None,
         message_thread_id: int = None,
@@ -3007,6 +3008,9 @@ class Message(Object, Update):
                 Pass a file_id as string to send a sticker that exists on the Telegram servers,
                 pass an HTTP URL as a string for Telegram to get a .webp sticker file from the Internet, or
                 pass a file path as string to upload a new sticker that exists on your local machine.
+  
+            alt (``str``, *optional*):
+                Alternative emoji representation of sticker
 
             quote (``bool``, *optional*):
                 If ``True``, the message will be sent as a reply to this message.
@@ -3090,6 +3094,7 @@ class Message(Object, Update):
         return await self._client.send_sticker(
             chat_id=self.chat.id,
             sticker=sticker,
+            alt=alt,
             disable_notification=disable_notification,
             message_thread_id=message_thread_id,
             effect_id=effect_id,

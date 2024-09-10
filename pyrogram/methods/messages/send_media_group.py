@@ -213,7 +213,7 @@ class SendMediaGroup:
                                     thumb=await self.save_file(i.thumb),
                                     spoiler=i.has_spoiler,
                                     mime_type=self.guess_mime_type(i.media) or "video/mp4",
-                                    nosound_video=True,
+                                    nosound_video=i.no_sound,
                                     attributes=[
                                         raw.types.DocumentAttributeVideo(
                                             supports_streaming=i.supports_streaming or None,
@@ -221,7 +221,7 @@ class SendMediaGroup:
                                             w=i.width,
                                             h=i.height
                                         ),
-                                        raw.types.DocumentAttributeFilename(file_name=os.path.basename(i.media))
+                                        raw.types.DocumentAttributeFilename(file_name=i.file_name or os.path.basename(i.media))
                                     ]
                                 ),
                                 business_connection_id=business_connection_id
@@ -267,7 +267,7 @@ class SendMediaGroup:
                                 thumb=await self.save_file(i.thumb),
                                 spoiler=i.has_spoiler,
                                 mime_type=self.guess_mime_type(getattr(i.media, "name", "video.mp4")) or "video/mp4",
-                                nosound_video=True,
+                                nosound_video=i.no_sound,
                                 attributes=[
                                     raw.types.DocumentAttributeVideo(
                                         supports_streaming=i.supports_streaming or None,
@@ -275,7 +275,7 @@ class SendMediaGroup:
                                         w=i.width,
                                         h=i.height
                                     ),
-                                    raw.types.DocumentAttributeFilename(file_name=getattr(i.media, "name", "video.mp4"))
+                                    raw.types.DocumentAttributeFilename(file_name=i.file_name or getattr(i.media, "name", "video.mp4"))
                                 ]
                             ),
                             business_connection_id=business_connection_id
@@ -306,7 +306,7 @@ class SendMediaGroup:
                                             performer=i.performer,
                                             title=i.title
                                         ),
-                                        raw.types.DocumentAttributeFilename(file_name=os.path.basename(i.media))
+                                        raw.types.DocumentAttributeFilename(file_name=i.file_name or os.path.basename(i.media))
                                     ]
                                 ),
                                 business_connection_id=business_connection_id
@@ -354,7 +354,7 @@ class SendMediaGroup:
                                         performer=i.performer,
                                         title=i.title
                                     ),
-                                    raw.types.DocumentAttributeFilename(file_name=getattr(i.media, "name", "audio.mp3"))
+                                    raw.types.DocumentAttributeFilename(file_name=i.file_name or getattr(i.media, "name", "audio.mp3"))
                                 ]
                             ),
                             business_connection_id=business_connection_id
@@ -379,7 +379,7 @@ class SendMediaGroup:
                                     file=await self.save_file(i.media),
                                     thumb=await self.save_file(i.thumb),
                                     attributes=[
-                                        raw.types.DocumentAttributeFilename(file_name=os.path.basename(i.media))
+                                        raw.types.DocumentAttributeFilename(file_name=i.file_name or os.path.basename(i.media))
                                     ]
                                 ),
                                 business_connection_id=business_connection_id
@@ -424,7 +424,7 @@ class SendMediaGroup:
                                 file=await self.save_file(i.media),
                                 thumb=await self.save_file(i.thumb),
                                 attributes=[
-                                    raw.types.DocumentAttributeFilename(file_name=getattr(i.media, "name", "file.zip"))
+                                    raw.types.DocumentAttributeFilename(file_name=i.file_name or getattr(i.media, "name", "file.zip"))
                                 ]
                             ),
                             business_connection_id=business_connection_id

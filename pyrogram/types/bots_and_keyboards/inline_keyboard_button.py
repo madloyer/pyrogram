@@ -76,6 +76,9 @@ class InlineKeyboardButton(Object):
         pay (``bool``, *optional*):
             Change text of pay button.
             Available in :meth:`~pyrogram.Client.send_invoice`.
+        
+        copy_text (``str``,*optional*):
+            Text to copy.
     """
 
     def __init__(
@@ -90,7 +93,8 @@ class InlineKeyboardButton(Object):
         switch_inline_query_current_chat: Optional[str] = None,
         callback_game: Optional["types.CallbackGame"] = None,
         requires_password: Optional[bool] = None,
-        pay: bool = None
+        pay: bool = None,
+        copy_text: str = None
     ):
         super().__init__()
 
@@ -105,6 +109,7 @@ class InlineKeyboardButton(Object):
         self.callback_game = callback_game
         self.requires_password = requires_password
         self.pay = pay
+        self.copy_text = str(copy_text)
 
     @staticmethod
     def read(b: "raw.base.KeyboardButton"):
@@ -227,3 +232,6 @@ class InlineKeyboardButton(Object):
 
         if self.pay is not None:
             return raw.types.KeyboardButtonBuy(text=self.text)
+        
+        if self.copy_text is not None:
+            return raw.types.keyboard_button_copy.KeyboardButtonCopy(text=self.text,copy_text=self.copy_text)

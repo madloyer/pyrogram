@@ -79,6 +79,7 @@ class InlineKeyboardButton(Object):
         
         copy_text (``str``,*optional*):
             Text to copy.
+            Limited to 256 character.
     """
 
     def __init__(
@@ -234,4 +235,7 @@ class InlineKeyboardButton(Object):
             return raw.types.KeyboardButtonBuy(text=self.text)
         
         if self.copy_text is not None:
-            return raw.types.keyboard_button_copy.KeyboardButtonCopy(text=self.text,copy_text=self.copy_text)
+            return raw.types.KeyboardButtonCopy(
+                text=self.text,
+                copy_text=self.copy_text
+            )

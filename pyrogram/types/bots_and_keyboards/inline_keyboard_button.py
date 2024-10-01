@@ -72,6 +72,10 @@ class InlineKeyboardButton(Object):
 
         callback_data_with_password (``bytes``, *optional*):
             A button that asks for the 2-step verification password of the current user and then sends a callback query to a bot Data to be sent to the bot via a callback query.
+
+        pay (``bool``, *optional*):
+            Change text of pay button.
+            Available in :meth:`~pyrogram.Client.send_invoice`.
     """
 
     def __init__(
@@ -85,7 +89,8 @@ class InlineKeyboardButton(Object):
         switch_inline_query: Optional[str] = None,
         switch_inline_query_current_chat: Optional[str] = None,
         callback_game: Optional["types.CallbackGame"] = None,
-        requires_password: Optional[bool] = None
+        requires_password: Optional[bool] = None,
+        pay: bool = None
     ):
         super().__init__()
 
@@ -99,7 +104,7 @@ class InlineKeyboardButton(Object):
         self.switch_inline_query_current_chat = switch_inline_query_current_chat
         self.callback_game = callback_game
         self.requires_password = requires_password
-        # self.pay = pay
+        self.pay = pay
 
     @staticmethod
     def read(b: "raw.base.KeyboardButton"):
@@ -163,7 +168,8 @@ class InlineKeyboardButton(Object):
 
         if isinstance(b, raw.types.KeyboardButtonBuy):
             return InlineKeyboardButton(
-                text=b.text
+                text=b.text,
+                pay=True
             )
 
     async def write(self, client: "pyrogram.Client"):
@@ -218,3 +224,6 @@ class InlineKeyboardButton(Object):
                 text=self.text,
                 url=self.web_app.url
             )
+
+        if self.pay is not None:
+            return raw.types.KeyboardButtonBuy(text=self.text)

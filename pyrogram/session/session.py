@@ -18,6 +18,7 @@
 
 import asyncio
 import logging
+from contextlib import suppress
 from io import BytesIO
 from typing import (
     Any,
@@ -56,6 +57,12 @@ class RequestState:
     ):
         self.request = request
         self.future = asyncio.Future()
+
+    def __str__(self):
+        return str(self.request)
+
+    def done(self) -> bool:
+        return self.future.done()
 
     def set_result(self, value: Any) -> None:
         if self.future.done():
@@ -152,7 +159,8 @@ class Session:
         self.results: Dict[int, RequestState] = {}
 
         self.ping_task: "Optional[asyncio.Task[None]]" = None
-        self.ping_task_event = asyncio.Event()
+        self.ping_event = asyncio.Event()
+        self.pong_event = asyncio.Event()
 
         self.recv_task: "Optional[asyncio.Task[None]]" = None
         self.send_task: "Optional[asyncio.Task[None]]" = None
@@ -255,7 +263,8 @@ class Session:
 
     async def stop(self):
         self.is_started.clear()
-        self.ping_task_event.clear()
+        self.ping_event.clear()
+        self.pong_event.clear()
 
         await task_cancel(
             self.ping_task,
@@ -285,16 +294,18 @@ class Session:
 
         while True:
             log.debug("wait ping task begin")
-            try:
-                await asyncio.wait_for(self.ping_task_event.wait(), self.WAIT_TIMEOUT + 15)
-            except asyncio.TimeoutError:
-                log.debug("ping task timeout")
+
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self.ping_event.wait(), self.WAIT_TIMEOUT + 15)
+
+            log.debug("wait ping task end")
+
+            if not self.pong_event.is_set():
+                log.debug("pong not found")
                 asyncio.create_task(self.restart(), name="session-restart")  # TODO: graceful restart
                 break
-            finally:
-                log.debug("wait ping task end")
 
-            self.ping_task_event.clear()
+            self.pong_event.clear()
             self.pending_requests.put_nowait(
                 RequestState(
                     raw.functions.PingDelayDisconnect(
@@ -322,6 +333,10 @@ class Session:
             log.debug("pending request: %s", request_state)
 
             try:
+                if request_state.done():
+                    log.debug("drop request: %s", request_state)
+                    continue
+
                 now = self.auth_data.get_client_time()
                 message = self.auth_data.msg_factory(
                     body=request_state.request,
@@ -351,11 +366,12 @@ class Session:
                     log.debug("connection.send end")
                 except OSError as exc:
                     log.warning("Connection error: %s", exc)  # TODO: graceful restart
-                    raise
+                    asyncio.create_task(self.restart(), name="session-restart")
+                    break
                 else:
                     log.debug("Sent: %s", request_state)
             finally:
-                # self.pending_requests.task_done()
+                self.pending_requests.task_done()
                 log.debug("pending request done")
 
     async def recv_worker(self):
@@ -471,6 +487,8 @@ class Session:
             except Exception as exc:
                 log.warning("Unhandled exception: %s", exc)
 
+        self.set_request_state_result(message.msg_id, message.body)
+
     async def handle_rpc_result(self, message: raw.core.Message[raw.types.RpcResult]) -> None:
         log.debug("raw.types.RpcResult received: %s", message)
 
@@ -506,8 +524,7 @@ class Session:
                 message_id=message.msg_id
             )
 
-        self.ping_task_event.set()
-
+        self.pong_event.set()
         self.set_request_state_result(
             msg_id=message.body.msg_id,
             value=message.body

@@ -77,7 +77,7 @@ class InlineKeyboardButton(Object):
             Change text of pay button.
             Available in :meth:`~pyrogram.Client.send_invoice`.
         
-        copy_text (``str``,*optional*):
+        copy_text (``str``, *optional*):
             Text to copy.
             Limited to 256 character.
     """

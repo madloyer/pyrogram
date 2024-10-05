@@ -128,4 +128,3 @@ venv.bak/
 
 # mypy
 .mypy_cache/
-tester.py

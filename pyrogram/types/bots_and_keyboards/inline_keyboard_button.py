@@ -110,7 +110,7 @@ class InlineKeyboardButton(Object):
         self.callback_game = callback_game
         self.requires_password = requires_password
         self.pay = pay
-        self.copy_text = str(copy_text)
+        self.copy_text = copy_text
 
     @staticmethod
     def read(b: "raw.base.KeyboardButton"):
@@ -176,6 +176,12 @@ class InlineKeyboardButton(Object):
             return InlineKeyboardButton(
                 text=b.text,
                 pay=True
+            )
+        
+        if isinstance(b, raw.types.KeyboardButtonCopy):
+            return InlineKeyboardButton(
+                text=b.text,
+                copy_text=b.copy_text
             )
 
     async def write(self, client: "pyrogram.Client"):

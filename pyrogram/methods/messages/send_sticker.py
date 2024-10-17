@@ -36,6 +36,7 @@ class SendSticker:
         self: "pyrogram.Client",
         chat_id: Union[int, str],
         sticker: Union[str, BinaryIO],
+        alt: str = "😐",
         disable_notification: bool = None,
         message_thread_id: int = None,
         effect_id: int = None,
@@ -73,8 +74,11 @@ class SendSticker:
                 Pass a file_id as string to send a sticker that exists on the Telegram servers,
                 pass an HTTP URL as a string for Telegram to get a .webp sticker file from the Internet,
                 pass a file path as string to upload a new sticker that exists on your local machine, or
-                pass a binary file-like object with its attribute ".name" set for in-memory uploads.
-
+                pass a binary file-like object with its attribute ".name" set for in-memory uploads
+   
+            alt (``str``, *optional*):
+                Alternative emoji representation of sticker
+                
             disable_notification (``bool``, *optional*):
                 Sends the message silently.
                 Users will receive a notification with no sound.
@@ -168,7 +172,10 @@ class SendSticker:
                         mime_type=self.guess_mime_type(sticker) or "image/webp",
                         file=file,
                         attributes=[
-                            raw.types.DocumentAttributeFilename(file_name=os.path.basename(sticker))
+                            raw.types.DocumentAttributeFilename(file_name=os.path.basename(sticker)),
+                            raw.types.DocumentAttributeSticker(alt=alt,
+                                                               stickerset=pyrogram.raw.types.InputStickerSetEmpty()
+                                                               ),
                         ]
                     )
                 elif re.match("^https?://", sticker):
@@ -183,7 +190,10 @@ class SendSticker:
                     mime_type=self.guess_mime_type(sticker.name) or "image/webp",
                     file=file,
                     attributes=[
-                        raw.types.DocumentAttributeFilename(file_name=sticker.name)
+                        raw.types.DocumentAttributeFilename(file_name=sticker.name),
+                        raw.types.DocumentAttributeSticker(alt=alt,
+                                                          stickerset=pyrogram.raw.types.InputStickerSetEmpty()
+                                                          ),
                     ]
                 )
 
